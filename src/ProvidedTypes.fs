@@ -6623,7 +6623,7 @@ namespace ProviderImplementation.ProvidedTypes.AssemblyReader
               failwithf  "FAILED decodeILCustomAttribData, data.Length = %d, data = %A, meth = %A, argtypes = %A, fixedArgs=%A, nnamed = %A, sigptr before named = %A,  innerError = %A" bytes.Length bytes ca.Method.EnclosingType ca.Method.FormalArgTypes fixedArgs nnamed sigptr (err.ToString())
 
         // Share DLLs across providers by caching them
-        let readerCache = ConcurrentDictionary<(string * string), DateTime * int * ILModuleReader>()
+        let readerCache = ConcurrentDictionary<(string * string), DateTime * int * ILModuleReader>(HashIdentity.Structural)
 
         type File with 
             static member ReadBinaryChunk (fileName: string, start, len) = 
@@ -6646,12 +6646,27 @@ namespace ProviderImplementation.ProvidedTypes.AssemblyReader
 
         let GetReaderCache () = ReadOnlyDictionary(readerCache)
 
+        // Experimental memory redution feature: enable auto-clear of the cache now and then
+        let enableAutoClear = try Environment.GetEnvironmentVariable("FSHARP_TPREADER_AUTOCLEAR") <> null with _ -> false
+        let mutable lastClear = DateTime.Now
+
+        let CheckClearReaderCache() = 
+            if enableAutoClear then 
+                let now = DateTime.Now
+                if now - lastClear > TimeSpan.FromMinutes(1.0) then 
+                    readerCache.Clear()
+                    lastClear <- now
+
         let ILModuleReaderAfterReadingAllBytes (file:string, ilGlobals: ILGlobals) =
             let key = (file, ilGlobals.systemRuntimeScopeRef.QualifiedName)
+
+            CheckClearReaderCache()
+
             let add _ = 
                 let lastWriteTime = File.GetLastWriteTime(file)
                 let reader = createReader ilGlobals file
                 (lastWriteTime, 1, reader)
+
             let update _ (currentLastWriteTime, count, reader) =
                 let lastWriteTime = File.GetLastWriteTime(file)
                 if currentLastWriteTime <> lastWriteTime then
@@ -14570,6 +14585,7 @@ namespace ProviderImplementation.ProvidedTypes
 
         let ctxt = ProvidedTypesContext.Create (config, assemblyReplacementMap, sourceAssemblies)
 
+        do CheckClearReaderCache()
 
 #if !NO_GENERATIVE
         let theTable = ConcurrentDictionary<string, byte[]>()
@@ -14695,11 +14711,14 @@ namespace ProviderImplementation.ProvidedTypes
                 AppDomain.CurrentDomain.remove_AssemblyResolve handler
 #endif
 
-        member __.AddNamespace (namespaceName, types) = namespacesT.Add (makeProvidedNamespace namespaceName types)
+        member __.AddNamespace (namespaceName, types) = 
+            namespacesT.Add (makeProvidedNamespace namespaceName types)
 
-        member __.Namespaces = namespacesT.ToArray()
+        member __.Namespaces = 
+            namespacesT.ToArray()
 
-        member this.Invalidate() = invalidateE.Trigger(this,EventArgs())
+        member this.Invalidate() = 
+            invalidateE.Trigger(this,EventArgs())
 
         member __.GetStaticParametersForMethod(mb: MethodBase) =
             match mb with

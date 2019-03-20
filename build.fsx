@@ -34,7 +34,7 @@ let release =
     |> ReleaseNotesHelper.parseReleaseNotes
 
 let useMsBuildToolchain = environVar "USE_MSBUILD" <> null
-let dotnetSdkVersion = "2.1.403"
+let dotnetSdkVersion = "2.1.504"
 let sdkPath = lazy DotNetCli.InstallDotNetSDK dotnetSdkVersion
 let getSdkPath() = sdkPath.Value
 
